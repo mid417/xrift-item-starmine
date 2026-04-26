@@ -1,0 +1,9 @@
+{
+  "item": {
+    "distDir": "./dist",
+    "buildCommand": "npm run build",
+    "title": "打ち上げ花火",
+    "description": "A sample item created with XRift item template",
+    "thumbnailPath": "thumbnail.png"
+  }
+}
