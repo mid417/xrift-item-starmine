@@ -29,6 +29,11 @@
     "react-dom": "^19.0.0",
     "three": "^0.183.1"
   },
+  "dependencies": {
+    "@react-three/uikit": "^1.0.64",
+    "@xrift/world-components": "^0.39.0",
+    "hls.js": "^1.6.16"
+  },
   "devDependencies": {
     "@originjs/vite-plugin-federation": "^1.4.1",
     "@react-three/drei": "^10.7.7",

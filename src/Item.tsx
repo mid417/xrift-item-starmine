@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { RigidBody } from '@react-three/rapier'
+import { Interactable } from '@xrift/world-components'
 import { Group, MathUtils, Mesh, PointLight, Vector3 } from 'three'
 
 const FIREWORK_DELAY_MS = 10_000
@@ -54,6 +55,7 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   const phaseRef = useRef<FireworkPhase>('idle')
   const phaseStartedAtRef = useRef(0)
   const launchAtRef = useRef(0)
+  const launchTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
   const [phase, setPhase] = useState<FireworkPhase>('idle')
 
   if (particleSeedsRef.current.length === 0) {
@@ -66,15 +68,69 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
     setPhase(nextPhase)
   }
 
-  useEffect(() => {
-    launchAtRef.current = performance.now() + FIREWORK_DELAY_MS
+  const clearLaunchTimeout = () => {
+    if (launchTimeoutRef.current === null) {
+      return
+    }
 
-    const timerId = globalThis.setTimeout(() => {
+    globalThis.clearTimeout(launchTimeoutRef.current)
+    launchTimeoutRef.current = null
+  }
+
+  const resetVisualState = () => {
+    if (rocketRef.current) {
+      rocketRef.current.position.set(0, ROCKET_IDLE_Y, 0)
+      rocketRef.current.rotation.set(0, 0, 0)
+    }
+
+    if (flameRef.current) {
+      flameRef.current.scale.setScalar(1)
+    }
+
+    if (burstLightRef.current) {
+      burstLightRef.current.intensity = 0
+    }
+
+    if (burstFlashRef.current) {
+      burstFlashRef.current.scale.setScalar(0.01)
+    }
+
+    if (shockwaveRef.current) {
+      shockwaveRef.current.scale.setScalar(0.01)
+      shockwaveRef.current.rotation.set(-Math.PI / 2, 0, 0)
+    }
+
+    particleRefs.current.forEach((particle) => {
+      if (!particle) {
+        return
+      }
+
+      particle.scale.setScalar(0.01)
+      particle.position.set(0, BURST_HEIGHT, 0)
+    })
+  }
+
+  const scheduleLaunch = () => {
+    clearLaunchTimeout()
+    launchAtRef.current = performance.now() + FIREWORK_DELAY_MS
+    launchTimeoutRef.current = globalThis.setTimeout(() => {
+      launchTimeoutRef.current = null
       transitionTo('launch')
     }, FIREWORK_DELAY_MS)
+  }
+
+  const resetFirework = () => {
+    transitionTo('idle')
+    resetVisualState()
+    scheduleLaunch()
+  }
+
+  useEffect(() => {
+    resetVisualState()
+    scheduleLaunch()
 
     return () => {
-      globalThis.clearTimeout(timerId)
+      clearLaunchTimeout()
     }
   }, [])
 
@@ -194,6 +250,22 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
           <meshStandardMaterial color="#262626" metalness={0.7} roughness={0.25} />
         </mesh>
       </RigidBody>
+
+      {phase === 'done' ? (
+        <Interactable id="item-starmine-reset" type="button" onInteract={resetFirework} interactionText="花火をリセット">
+          <group>
+            <mesh position={[0, 0.48, 0]}>
+              <sphereGeometry args={[0.72, 16, 16]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            </mesh>
+
+            <mesh position={[0, 0.48, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[0.3, 0.035, 12, 32]} />
+              <meshStandardMaterial color="#ffe066" emissive="#ffb703" emissiveIntensity={2} transparent opacity={0.9} />
+            </mesh>
+          </group>
+        </Interactable>
+      ) : null}
 
       <group ref={rocketRef} position={[0, ROCKET_IDLE_Y, 0]} visible={phase !== 'done' && phase !== 'burst'}>
         <mesh castShadow>

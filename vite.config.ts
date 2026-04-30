@@ -51,6 +51,11 @@ export default defineConfig({
           singleton: true,
           requiredVersion: '^10.7.3',
         },
+        '@xrift/world-components': {
+          singleton: true,
+          import: false,
+          generate: false,
+        },
       },
     }),
   ],
@@ -59,6 +64,11 @@ export default defineConfig({
     minify: false,
     cssCodeSplit: false,
     assetsDir: '',
+  },
+  server: {
+    watch: {
+      ignored: ['**/.vscode', '**/.vscode/**'],
+    },
   },
   resolve: {
     alias: {
