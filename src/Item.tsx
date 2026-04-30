@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { Billboard, Text } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { RigidBody } from '@react-three/rapier'
 import { Interactable } from '@xrift/world-components'
 import { Group, MathUtils, Mesh, PointLight, Vector3 } from 'three'
 
 const FIREWORK_DELAY_MS = 10_000
+const COUNTDOWN_ZERO_HOLD_SEC = 0.18
 const LAUNCH_DURATION_SEC = 1.4
 const BURST_DURATION_SEC = 2.4
 const ROCKET_IDLE_Y = 0.78
@@ -55,8 +57,9 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   const phaseRef = useRef<FireworkPhase>('idle')
   const phaseStartedAtRef = useRef(0)
   const launchAtRef = useRef(0)
-  const launchTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
+  const countdownValueRef = useRef<number | null>(null)
   const [phase, setPhase] = useState<FireworkPhase>('idle')
+  const [countdownValue, setCountdownValue] = useState<number | null>(null)
 
   if (particleSeedsRef.current.length === 0) {
     particleSeedsRef.current = Array.from({ length: PARTICLE_COUNT }, (_, index) => createParticleSeed(index))
@@ -68,13 +71,13 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
     setPhase(nextPhase)
   }
 
-  const clearLaunchTimeout = () => {
-    if (launchTimeoutRef.current === null) {
+  const syncCountdownValue = (nextCountdownValue: number | null) => {
+    if (countdownValueRef.current === nextCountdownValue) {
       return
     }
 
-    globalThis.clearTimeout(launchTimeoutRef.current)
-    launchTimeoutRef.current = null
+    countdownValueRef.current = nextCountdownValue
+    setCountdownValue(nextCountdownValue)
   }
 
   const resetVisualState = () => {
@@ -111,12 +114,8 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   }
 
   const scheduleLaunch = () => {
-    clearLaunchTimeout()
     launchAtRef.current = performance.now() + FIREWORK_DELAY_MS
-    launchTimeoutRef.current = globalThis.setTimeout(() => {
-      launchTimeoutRef.current = null
-      transitionTo('launch')
-    }, FIREWORK_DELAY_MS)
+    syncCountdownValue(Math.ceil(FIREWORK_DELAY_MS / 1000))
   }
 
   const resetFirework = () => {
@@ -128,16 +127,27 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   useEffect(() => {
     resetVisualState()
     scheduleLaunch()
-
-    return () => {
-      clearLaunchTimeout()
-    }
   }, [])
 
   useFrame((state, delta) => {
     const now = performance.now()
-    const currentPhase = phaseRef.current
-    const phaseElapsed = (now - phaseStartedAtRef.current) / 1000
+    let currentPhase = phaseRef.current
+    let phaseElapsed = (now - phaseStartedAtRef.current) / 1000
+
+    if (currentPhase === 'idle') {
+      if (launchAtRef.current > 0 && now >= launchAtRef.current) {
+        transitionTo('launch')
+        currentPhase = 'launch'
+        phaseElapsed = 0
+      } else if (launchAtRef.current > 0) {
+        const remainingMs = Math.max(launchAtRef.current - now, 0)
+        syncCountdownValue(Math.ceil(remainingMs / 1000))
+      }
+    } else if (currentPhase === 'launch' && phaseElapsed <= COUNTDOWN_ZERO_HOLD_SEC) {
+      syncCountdownValue(0)
+    } else {
+      syncCountdownValue(null)
+    }
 
     if (fuseLightRef.current) {
       if (currentPhase === 'idle') {
@@ -288,6 +298,21 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
 
       <pointLight ref={fuseLightRef} position={[0, 0.66, 0]} color="#ffb703" distance={3.5} />
       <pointLight ref={burstLightRef} position={[0, BURST_HEIGHT, 0]} color="#ffd166" distance={14} intensity={0} />
+
+      {countdownValue !== null ? (
+        <Billboard position={[0, 1.46, 0]}>
+          <Text
+            anchorX="center"
+            anchorY="middle"
+            color="#fff6bf"
+            fontSize={0.34}
+            outlineColor="#8b1e2d"
+            outlineWidth={0.04}
+          >
+            {countdownValue.toString()}
+          </Text>
+        </Billboard>
+      ) : null}
 
       <mesh ref={burstFlashRef} position={[0, BURST_HEIGHT, 0]} visible={phase === 'burst'}>
         <sphereGeometry args={[0.45, 24, 24]} />
