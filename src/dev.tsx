@@ -10,7 +10,7 @@ import { createRoot } from 'react-dom/client'
 import { Canvas } from '@react-three/fiber'
 import { Physics } from '@react-three/rapier'
 import { OrbitControls } from '@react-three/drei'
-import { XRiftProvider } from '@xrift/world-components'
+import { ItemProvider, XRiftProvider } from '@xrift/world-components'
 import { Item } from './Item'
 
 const rootElement = document.getElementById('root')
@@ -28,7 +28,9 @@ createRoot(rootElement).render(
               intensity={1}
               castShadow
             />
-            <Item position={[0, 0, 0]} />
+            <ItemProvider id="dev-item-starmine">
+              <Item position={[0, 0, 0]} />
+            </ItemProvider>
             {/* 地面 */}
             <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
               <planeGeometry args={[10, 10]} />

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Billboard, Text } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { RigidBody } from '@react-three/rapier'
-import { Interactable, useInstanceState, useXRift } from '@xrift/world-components'
-import { Group, MathUtils, Mesh, PointLight, Vector3 } from 'three'
+import { Interactable, useInstanceState, useItem, useXRift } from '@xrift/world-components'
+import { Color, Group, InstancedMesh, MathUtils, Mesh, Object3D, PointLight, Vector3 } from 'three'
 
 const FIREWORK_DELAY_MS = 10_000
 const COUNTDOWN_ZERO_HOLD_SEC = 0.18
@@ -30,7 +30,11 @@ const FIREWORK_AUDIO_FILES: Record<FireworkAudioKey, string> = {
   starMine: 'star-mine.mp3',
   mine: 'mine.mp3',
 }
-const FIREWORK_SYNC_STATE_ID = 'item-starmine-firework'
+const FIREWORK_SYNC_STATE_ID_PREFIX = 'item-starmine-firework'
+const RESET_INTERACTABLE_ID_PREFIX = 'item-starmine-reset'
+
+const createFireworkSyncStateId = (itemId: string) => `${FIREWORK_SYNC_STATE_ID_PREFIX}-${itemId}`
+const createResetInteractableId = (itemId: string) => `${RESET_INTERACTABLE_ID_PREFIX}-${itemId}`
 
 interface FireworkSelection {
   pattern: FireworkPattern
@@ -220,10 +224,13 @@ export interface ItemProps {
 }
 
 export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) => {
+  const { id: itemId } = useItem()
   const { baseUrl } = useXRift()
+  const fireworkSyncStateId = createFireworkSyncStateId(itemId)
+  const resetInteractableId = createResetInteractableId(itemId)
   const initialFireworkSyncStateRef = useRef<FireworkSyncState>(createFireworkSyncState())
   const [fireworkSyncState, setFireworkSyncState] = useInstanceState<FireworkSyncState>(
-    FIREWORK_SYNC_STATE_ID,
+    fireworkSyncStateId,
     initialFireworkSyncStateRef.current,
   )
   const groupRef = useRef<Group>(null)
@@ -233,11 +240,13 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   const burstLightRef = useRef<PointLight>(null)
   const burstFlashRef = useRef<Mesh>(null)
   const shockwaveRef = useRef<Mesh>(null)
+  const burstParticlesRef = useRef<InstancedMesh>(null)
   const fireworkAudioRefs = useRef<Record<FireworkAudioKey, HTMLAudioElement | null>>({
     starMine: null,
     mine: null,
   })
-  const particleRefs = useRef<Array<Mesh | null>>([])
+  const particleInstanceColorRef = useRef(new Color())
+  const particleInstanceObjectRef = useRef(new Object3D())
   const particleSeedsRef = useRef<ParticleSeed[]>(createParticleSeeds(initialFireworkSyncStateRef.current.firework))
   const currentFireworkRef = useRef<FireworkSelection | null>(initialFireworkSyncStateRef.current.firework)
   const appliedSyncRevisionRef = useRef<number | null>(null)
@@ -272,8 +281,15 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   }
 
   const transitionTo = (nextPhase: FireworkPhase, startedAt = Date.now(), playAudio = true) => {
+    const previousPhase = phaseRef.current
+
     phaseRef.current = nextPhase
     phaseStartedAtRef.current = startedAt
+
+    if (previousPhase === 'burst' && nextPhase !== 'burst') {
+      resetBurstEffects()
+      resetParticles()
+    }
 
     if (playAudio) {
       playFireworkAudio(nextPhase)
@@ -291,6 +307,32 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
     setCountdownValue(nextCountdownValue)
   }
 
+  const updateParticleInstance = (
+    index: number,
+    x: number,
+    y: number,
+    z: number,
+    scaleValue: number,
+    color?: string,
+  ) => {
+    const burstParticles = burstParticlesRef.current
+
+    if (!burstParticles) {
+      return
+    }
+
+    const particleInstanceObject = particleInstanceObjectRef.current
+    particleInstanceObject.position.set(x, y, z)
+    particleInstanceObject.scale.setScalar(scaleValue)
+    particleInstanceObject.updateMatrix()
+    burstParticles.setMatrixAt(index, particleInstanceObject.matrix)
+
+    if (color) {
+      particleInstanceColorRef.current.set(color)
+      burstParticles.setColorAt(index, particleInstanceColorRef.current)
+    }
+  }
+
   const syncBurstAnchors = () => {
     const nextBurstHeight = currentFireworkRef.current?.burstHeight ?? BURST_HEIGHT
 
@@ -304,6 +346,41 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
 
     if (shockwaveRef.current) {
       shockwaveRef.current.position.set(0, nextBurstHeight, 0)
+    }
+  }
+
+  const resetBurstEffects = () => {
+    if (burstLightRef.current) {
+      burstLightRef.current.intensity = 0
+    }
+
+    if (burstFlashRef.current) {
+      burstFlashRef.current.scale.setScalar(0.01)
+    }
+
+    if (shockwaveRef.current) {
+      shockwaveRef.current.scale.setScalar(0.01)
+      shockwaveRef.current.rotation.set(-Math.PI / 2, 0, 0)
+    }
+  }
+
+  const resetParticles = () => {
+    const burstParticles = burstParticlesRef.current
+
+    if (!burstParticles) {
+      return
+    }
+
+    const nextBurstHeight = currentFireworkRef.current?.burstHeight ?? BURST_HEIGHT
+
+    particleSeedsRef.current.forEach((seed, index) => {
+      updateParticleInstance(index, 0, nextBurstHeight, 0, 0.01, seed.color)
+    })
+
+    burstParticles.instanceMatrix.needsUpdate = true
+
+    if (burstParticles.instanceColor) {
+      burstParticles.instanceColor.needsUpdate = true
     }
   }
 
@@ -324,27 +401,8 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
       flameRef.current.scale.setScalar(1)
     }
 
-    if (burstLightRef.current) {
-      burstLightRef.current.intensity = 0
-    }
-
-    if (burstFlashRef.current) {
-      burstFlashRef.current.scale.setScalar(0.01)
-    }
-
-    if (shockwaveRef.current) {
-      shockwaveRef.current.scale.setScalar(0.01)
-      shockwaveRef.current.rotation.set(-Math.PI / 2, 0, 0)
-    }
-
-    particleRefs.current.forEach((particle) => {
-      if (!particle) {
-        return
-      }
-
-      particle.scale.setScalar(0.01)
-      particle.position.set(0, currentFireworkRef.current?.burstHeight ?? BURST_HEIGHT, 0)
-    })
+    resetBurstEffects()
+    resetParticles()
   }
 
   const applyFireworkSyncState = (nextFireworkSyncState: FireworkSyncState) => {
@@ -443,8 +501,6 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
     let currentPhase = phaseRef.current
     let phaseElapsed = (now - phaseStartedAtRef.current) / 1000
 
-    syncBurstAnchors()
-
     if (currentPhase === 'idle') {
       if (launchAtRef.current > 0 && now >= launchAtRef.current) {
         if (currentFireworkRef.current?.launches === false) {
@@ -498,74 +554,48 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
       }
     }
 
-    if (burstLightRef.current) {
-      if (currentPhase === 'burst') {
-        const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
-        burstLightRef.current.intensity = Math.pow(1 - burstProgress, 0.45) * 16
-      } else {
-        burstLightRef.current.intensity = 0
-      }
+    if (burstLightRef.current && currentPhase === 'burst') {
+      const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
+      burstLightRef.current.intensity = Math.pow(1 - burstProgress, 0.45) * 16
     }
 
-    if (burstFlashRef.current) {
-      if (currentPhase === 'burst') {
-        const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
-        const flashScale = 0.8 + burstProgress * 4.2
-        burstFlashRef.current.scale.setScalar(flashScale)
-      } else {
-        burstFlashRef.current.scale.setScalar(0.01)
-      }
+    if (burstFlashRef.current && currentPhase === 'burst') {
+      const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
+      const flashScale = 0.8 + burstProgress * 4.2
+      burstFlashRef.current.scale.setScalar(flashScale)
     }
 
-    if (shockwaveRef.current) {
-      if (currentPhase === 'burst') {
-        const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
-        const shockwaveScale = 0.8 + burstProgress * 8.5
-        shockwaveRef.current.scale.set(shockwaveScale, shockwaveScale, shockwaveScale)
-        shockwaveRef.current.rotation.z += delta * 1.6
-      } else {
-        shockwaveRef.current.scale.setScalar(0.01)
-      }
+    if (shockwaveRef.current && currentPhase === 'burst') {
+      const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
+      const shockwaveScale = 0.8 + burstProgress * 8.5
+      shockwaveRef.current.scale.set(shockwaveScale, shockwaveScale, shockwaveScale)
+      shockwaveRef.current.rotation.z += delta * 1.6
     }
 
-    if (currentPhase === 'burst') {
+    if (currentPhase === 'burst' && burstParticlesRef.current) {
       const burstProgress = MathUtils.clamp(phaseElapsed / BURST_DURATION_SEC, 0, 1)
 
-      particleRefs.current.forEach((particle, index) => {
-        if (!particle) {
-          return
-        }
-
-        const seed = particleSeedsRef.current[index]
+      particleSeedsRef.current.forEach((seed, index) => {
         const burstTime = phaseElapsed
         const wobble = Math.sin(burstTime * seed.wobbleSpeed + seed.wobblePhase) * seed.wobbleAmount
         const burstDrift = burstTime * burstTime
 
-        particle.position.set(
+        updateParticleInstance(
+          index,
           seed.velocity.x * burstTime + seed.drift.x * burstDrift + seed.wobbleAxis.x * wobble,
           currentBurstHeight + seed.velocity.y * burstTime + seed.drift.y * burstDrift - seed.gravity * burstDrift + seed.wobbleAxis.y * wobble * 0.35,
           seed.velocity.z * burstTime + seed.drift.z * burstDrift + seed.wobbleAxis.z * wobble,
+          Math.max(seed.scale * (seed.fade - burstProgress * (seed.fade - 0.22)), 0.02),
         )
-
-        const currentScale = Math.max(seed.scale * (seed.fade - burstProgress * (seed.fade - 0.22)), 0.02)
-        particle.scale.setScalar(currentScale)
       })
+
+      burstParticlesRef.current.instanceMatrix.needsUpdate = true
 
       if (burstProgress >= 1) {
         transitionTo('done')
       }
     }
 
-    if (currentPhase !== 'burst') {
-      particleRefs.current.forEach((particle) => {
-        if (!particle) {
-          return
-        }
-
-        particle.scale.setScalar(0.01)
-        particle.position.set(0, currentBurstHeight, 0)
-      })
-    }
   })
 
   return (
@@ -583,7 +613,7 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
       </RigidBody>
 
       {phase === 'done' ? (
-        <Interactable id="item-starmine-reset" type="button" onInteract={resetFirework} interactionText="花火をリセット">
+        <Interactable id={resetInteractableId} type="button" onInteract={resetFirework} interactionText="花火をリセット">
           <group>
             <mesh position={[0, 0.48, 0]}>
               <sphereGeometry args={[0.72, 16, 16]} />
@@ -645,19 +675,10 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
         <meshStandardMaterial color="#ffe066" emissive="#ff9f1c" emissiveIntensity={2.4} transparent opacity={0.7} />
       </mesh>
 
-      {particleSeedsRef.current.map((seed, index) => (
-        <mesh
-          key={index}
-          ref={(particle) => {
-            particleRefs.current[index] = particle
-          }}
-          position={[0, burstHeight, 0]}
-          visible={phase === 'burst'}
-        >
-          <sphereGeometry args={[seed.scale, 10, 10]} />
-          <meshStandardMaterial color={seed.color} emissive={seed.color} emissiveIntensity={2.8} />
-        </mesh>
-      ))}
+      <instancedMesh ref={burstParticlesRef} args={[undefined, undefined, PARTICLE_COUNT]} visible={phase === 'burst'} frustumCulled={false}>
+        <sphereGeometry args={[1, 10, 10]} />
+        <meshBasicMaterial color="#ffffff" toneMapped={false} />
+      </instancedMesh>
     </group>
   )
 }
