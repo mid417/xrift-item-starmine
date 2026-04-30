@@ -30,7 +30,6 @@ const FIREWORK_AUDIO_FILES: Record<FireworkAudioKey, string> = {
   starMine: 'star-mine.mp3',
   mine: 'mine.mp3',
 }
-const FIREWORK_AUDIO_LOG_PREFIX = '[item-starmine][audio]'
 
 interface FireworkSelection {
   pattern: FireworkPattern
@@ -51,22 +50,6 @@ interface ParticleSeed {
   fade: number
   scale: number
   color: string
-}
-
-const getAudioUrl = (audio: HTMLAudioElement) => audio.currentSrc || audio.src
-
-const getAudioErrorDetails = (error: unknown) => {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  return {
-    name: null,
-    message: typeof error === 'string' ? error : null,
-  }
 }
 
 const createShellDirection = (index: number) => {
@@ -267,18 +250,7 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
     const playPromise = fireworkAudio.play()
 
     if (playPromise !== undefined) {
-      void playPromise.catch((error: unknown) => {
-        const { name, message } = getAudioErrorDetails(error)
-
-        console.warn(`${FIREWORK_AUDIO_LOG_PREFIX} play() failed`, {
-          audioKey: currentFirework.audioKey,
-          audioPhase: nextPhase,
-          audioUrl: getAudioUrl(fireworkAudio),
-          errorName: name,
-          errorMessage: message,
-          autoplayBlocked: name === 'NotAllowedError',
-        })
-      })
+      void playPromise.catch(() => {})
     }
   }
 
@@ -370,25 +342,9 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
   useEffect(() => {
     const starMineAudio = new Audio(`${baseUrl}${FIREWORK_AUDIO_FILES.starMine}`)
     const mineAudio = new Audio(`${baseUrl}${FIREWORK_AUDIO_FILES.mine}`)
-    const createAudioErrorHandler = (audioKey: FireworkAudioKey, fireworkAudio: HTMLAudioElement) => {
-      return () => {
-        console.warn(`${FIREWORK_AUDIO_LOG_PREFIX} element error`, {
-          audioKey,
-          audioUrl: getAudioUrl(fireworkAudio),
-          mediaErrorCode: fireworkAudio.error?.code ?? null,
-          mediaErrorMessage: fireworkAudio.error?.message ?? null,
-          networkState: fireworkAudio.networkState,
-          readyState: fireworkAudio.readyState,
-        })
-      }
-    }
-    const handleStarMineAudioError = createAudioErrorHandler('starMine', starMineAudio)
-    const handleMineAudioError = createAudioErrorHandler('mine', mineAudio)
 
     starMineAudio.preload = 'auto'
     mineAudio.preload = 'auto'
-    starMineAudio.addEventListener('error', handleStarMineAudioError)
-    mineAudio.addEventListener('error', handleMineAudioError)
     starMineAudio.load()
     mineAudio.load()
 
@@ -398,9 +354,6 @@ export const Item: React.FC<ItemProps> = ({ position = [0, 0, 0], scale = 1 }) =
     }
 
     return () => {
-      starMineAudio.removeEventListener('error', handleStarMineAudioError)
-      mineAudio.removeEventListener('error', handleMineAudioError)
-
       for (const fireworkAudio of [starMineAudio, mineAudio]) {
         fireworkAudio.pause()
         fireworkAudio.currentTime = 0
