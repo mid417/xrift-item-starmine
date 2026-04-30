@@ -20,7 +20,7 @@ createRoot(rootElement).render(
   <StrictMode>
     <XRiftProvider baseUrl="/">
       <div style={{ width: '100vw', height: '100vh' }}>
-        <Canvas shadows camera={{ position: [3, 3, 3], fov: 50 }}>
+        <Canvas shadows camera={{ position: [9, 9, 20], fov: 60 }}>
           <Physics>
             <ambientLight intensity={0.4} />
             <directionalLight
@@ -34,7 +34,7 @@ createRoot(rootElement).render(
               <planeGeometry args={[10, 10]} />
               <meshStandardMaterial color="#888888" />
             </mesh>
-            <OrbitControls />
+            <OrbitControls target={[0, 8.5, 0]} />
           </Physics>
         </Canvas>
       </div>
